@@ -2,7 +2,13 @@
 TARGET = DaisyTape
 
 # Sources
-CPP_SOURCES = DaisyTape.cpp
+CPP_SOURCES = $(wildcard src/*.cpp)
+
+# Add include folder for headers
+C_INCLUDES += -Iinclude
+
+# Use C++17 (not needed for now)
+# CPP_STANDARD = -std=c++17
 
 # Library Locations
 LIBDAISY_DIR = ../DaisyExamples/libDaisy/

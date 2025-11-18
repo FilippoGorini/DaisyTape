@@ -1,0 +1,5 @@
+# Exclude compiled binaries
+build/
+
+# Exclude unnecessary vscode stuff
+.vscode/settings.json
