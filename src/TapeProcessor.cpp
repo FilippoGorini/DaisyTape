@@ -1,5 +1,5 @@
 #include "TapeProcessor.h"
-#include <cstring>
+#include <cstring> 
 
 // Implementation for linking the SDRAM objects
 void TapeProcessor::setDelayLinePointers(MakeupDelayLine* makeL, MakeupDelayLine* makeR,
@@ -13,7 +13,7 @@ void TapeProcessor::setDelayLinePointers(MakeupDelayLine* makeL, MakeupDelayLine
     dryDelayR = dryR;
 }
 
-void TapeProcessor::Init(float sampleRate)
+void TapeProcessor::Init(float sampleRate, const TapeParams& params)
 {
     const int numChannels = 2;
     inputFilters.prepare(sampleRate, numChannels);
@@ -29,7 +29,24 @@ void TapeProcessor::Init(float sampleRate)
         dryDelayR->Init();
         dryDelayR->SetDelay(0.0f);
     }
+
+    updateParams(params);       // Initialize with default params
 }
+
+void TapeProcessor::updateParams(const TapeParams& params)
+{
+    // --- Input Filters ---
+    inputFilters.setLowCut(params.lowCutFreq);
+    inputFilters.setHighCut(params.highCutFreq);
+    inputFilters.setEnabled(params.filtersEnabled);
+    inputFilters.setMakeupEnabled(params.makeupEnabled);
+
+    // --- Top-Level Parameters ---
+    dryWet = params.dryWet;
+
+    // ... Other modules will be updated here (Tone, Hysteresis, etc.) ...
+}
+
 
 void TapeProcessor::processBlock(const float* inL,
                                  const float* inR,
@@ -54,10 +71,12 @@ void TapeProcessor::processBlock(const float* inL,
     // --- 3. LATENCY COMPENSATION ---
     latencyCompensation(blockSize);
 
+
     // --- 4. MAKEUP GAIN PATH ---
     inputFilters.processBlockMakeup(bufferL, bufferR, blockSize);
 
     // ... Other makeup modules will go here ...
+
 
     // --- 5. FINAL MIX ---
     dryWetMix(outL, outR, blockSize);
@@ -71,7 +90,7 @@ void TapeProcessor::latencyCompensation(int32_t blockSize)
     // totalLatency += compression.getLatencySamples();
 
     // Placeholder: Use the fixed latency until we implement the other modules
-    totalLatency = 300.0f;
+    totalLatency = 300.0f; 
 
     // 2. Set delay for InputFilters' makeup path
     inputFilters.setMakeupDelay(totalLatency);

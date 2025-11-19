@@ -3,21 +3,28 @@
 #define TAPEPROCESSOR_H
 
 #include <stdint.h> 
-#include "Config.h"
-#include "DaisyInputFilters.h"
-#include "daisysp.h"
+#include "Config.h" 
+#include "DaisyInputFilters.h" 
+#include "daisysp.h" 
 
 // The Dry Delay uses the same massive size needed for latency compensation.
-using DryDelayLine = daisysp::DelayLine<float, MAKEUP_DELAY_SIZE>;
+using DryDelayLine = daisysp::DelayLine<float, MAKEUP_DELAY_SIZE>; 
+
+/**
+ * @brief Structure holding all the exposed control parameters for the tape model.
+ */
+struct TapeParams
+{
+    float lowCutFreq;
+    float highCutFreq;
+    float dryWet;
+    bool filtersEnabled;
+    bool makeupEnabled;
+    // Add other parameters (drive, rate, depth, etc.) here as they are ported
+};
 
 /**
  * @brief Main Tape Emulation Processor
- *
- * This class holds all the individual processing modules
- * (InputFilters, Hysteresis, etc.) and runs them in sequence,
- * managing the signal flow and latency compensation.
- *
- * It operates on a block-based architecture.
  */
 class TapeProcessor
 {
@@ -25,15 +32,19 @@ public:
     TapeProcessor() : dryWet(1.0f) {}
     ~TapeProcessor() {}
 
-    void Init(float sampleRate);
+    void Init(float sampleRate, const TapeParams& params);
 
     /**
      * @brief CRITICAL: Sets the pointers to the globally allocated SDRAM delay lines.
-     * @param makeL/R Pointers for the Input Filter makeup delay.
-     * @param dryL/R  Pointers for the main dry signal delay.
      */
     void setDelayLinePointers(MakeupDelayLine* makeL, MakeupDelayLine* makeR,
                               DryDelayLine* dryL, DryDelayLine* dryR);
+
+    /**
+     * @brief Updates all control parameters from the given structure.
+     */
+    void updateParams(const TapeParams& params);
+
 
     void processBlock(const float* inL,
                       const float* inR,
@@ -44,13 +55,6 @@ public:
     void latencyCompensation(int32_t blockSize);
     void dryWetMix(float* outL, float* outR, int32_t blockSize);
 
-    // --- Parameter Setters ---
-    void SetLowCutFreq(float freqHz) { inputFilters.setLowCut(freqHz); }
-    void SetHighCutFreq(float freqHz) { inputFilters.setHighCut(freqHz); }
-    void SetFiltersEnabled(bool enabled) { inputFilters.setEnabled(enabled); }
-    void SetMakeupEnabled(bool enabled) { inputFilters.setMakeupEnabled(enabled); }
-    void SetDryWet(float normVal) { dryWet = normVal; }
-
 private:
     // --- Processing Modules ---
     InputFilters inputFilters;
@@ -60,11 +64,8 @@ private:
     // --- Internal Buffers (Can be up to SAFE_MAX_BLOCK_SIZE) ---
     static constexpr int kMaxBlockSize = SAFE_MAX_BLOCK_SIZE;
 
-    // These hold the "wet" signal as it's being processed
     float bufferL[kMaxBlockSize];
     float bufferR[kMaxBlockSize];
-
-    // These hold the clean "dry" signal
     float dryBufferL[kMaxBlockSize];
     float dryBufferR[kMaxBlockSize];
 
@@ -72,7 +73,7 @@ private:
     DryDelayLine* dryDelayL = nullptr;
     DryDelayLine* dryDelayR = nullptr;
 
-    // --- Parameters ---
+    // --- Parameters (Internal state is kept in sub-processors) ---
     float dryWet;
 };
 
