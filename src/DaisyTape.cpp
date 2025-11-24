@@ -19,7 +19,8 @@ DryDelayLine DSY_SDRAM_BSS dryDelayR;
 DaisySeed hw;
 TapeProcessor tapeProcessor;
 TapeParams params;
-CpuLoadMeter cpuLoadMeter;
+CpuLoadMeter audioLoadMeter;
+CpuLoadMeter mainLoadMeter;
 
 // Potentiometer values
 float pot_lowcut  = 0.0f;
@@ -31,13 +32,13 @@ float pot_speed   = 0.0f;
 // Audio callback function
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
-    cpuLoadMeter.OnBlockStart();
+    audioLoadMeter.OnBlockStart();
 
     tapeProcessor.processBlock(
         in[0], in[1], out[0], out[1], size
     );
 
-    cpuLoadMeter.OnBlockEnd();
+    audioLoadMeter.OnBlockEnd();
 }
 
 
@@ -69,9 +70,12 @@ void log_status()
     hw.PrintLine("Highcut freq: " FLT_FMT3, FLT_VAR3(params.highCutFreq));
     hw.PrintLine("Loss Knob: " FLT_FMT3, FLT_VAR3(params.loss));
     hw.PrintLine("Speed (ips): " FLT_FMT3, FLT_VAR3(params.speed));
-    hw.PrintLine("Avg CPU Load: " FLT_FMT3, FLT_VAR3(cpuLoadMeter.GetAvgCpuLoad() * 100.0f));
-    hw.PrintLine("Max CPU Load: " FLT_FMT3, FLT_VAR3(cpuLoadMeter.GetMaxCpuLoad() * 100.0f));
-    hw.PrintLine("Min CPU Load: " FLT_FMT3, FLT_VAR3(cpuLoadMeter.GetMinCpuLoad() * 100.0f));
+    hw.PrintLine("Avg CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetAvgCpuLoad() * 100.0f));
+    hw.PrintLine("Max CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMaxCpuLoad() * 100.0f));
+    hw.PrintLine("Min CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMinCpuLoad() * 100.0f));
+    hw.PrintLine("Avg Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetAvgCpuLoad() * 100.0f));
+    hw.PrintLine("Max Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMaxCpuLoad() * 100.0f));
+    hw.PrintLine("Min Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMinCpuLoad() * 100.0f));
     hw.PrintLine("------------");
 }
 
@@ -108,7 +112,9 @@ int main(void)
     tapeProcessor.Init(sample_rate, params);
 
     // Setup CPU Load Meter
-    cpuLoadMeter.Init(sample_rate, hw.AudioBlockSize());
+    audioLoadMeter.Init(sample_rate, hw.AudioBlockSize());
+    mainLoadMeter.Init(100, 1);
+    
     int log_counter = 0;
 
     // Start adc, log and audio
@@ -117,7 +123,9 @@ int main(void)
     hw.StartAudio(AudioCallback);
 
     while(1)
-    {
+    {   
+        mainLoadMeter.OnBlockStart();
+
         // Read potentiometers and map them to parameters
         read_map_params();
         // Update parameters
@@ -127,6 +135,9 @@ int main(void)
             log_status();
             log_counter = 0;
         }
+
+        mainLoadMeter.OnBlockEnd();
+
         // Update at ~100Hz
         System::Delay(10);      // Probably better to switch to a timer with a wait for next period for more regular execution of main?
     }
