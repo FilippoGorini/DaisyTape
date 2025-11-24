@@ -5,7 +5,8 @@
 #include <stdint.h> 
 #include "Config.h" 
 #include "DaisyInputFilters.h" 
-#include "DaisyLossFilter.h" // Added Loss Filter
+#include "DaisyLossFilter.h" 
+#include "DaisyDegrade.h"
 #include "daisysp.h" 
 
 // The Dry Delay uses the same massive size needed for latency compensation.
@@ -29,9 +30,12 @@ struct TapeParams
     float thickness; // Microns
     float loss;      // Not really needed, added just to ease serial logging
 
-    // Degradation (Placeholders for next step)
-    float variance;
-    float envelope;
+    // Degradation (Added)
+    float deg_depth;
+    float deg_amount;
+    float deg_variance;
+    float deg_envelope;
+    bool deg_enabled;
 
     // Global
     float dryWet;
@@ -74,6 +78,7 @@ private:
     // --- Processing Modules ---
     InputFilters inputFilters;
     LossFilter lossFilter;
+    DegradeProcessor degradeProcessor; // <--- CRITICAL INSTANCE
     
     // ... Other modules (Hysteresis, etc.) will go here ...
 

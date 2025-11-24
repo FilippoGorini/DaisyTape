@@ -17,6 +17,7 @@ void TapeProcessor::Init(float sampleRate, const TapeParams& params)
     const int numChannels = 2;
     inputFilters.prepare(sampleRate, numChannels);
     lossFilter.prepare(sampleRate);
+    degradeProcessor.prepare(sampleRate); // <--- ADDED PREPARE
     
     // Init the Dry Delay objects via the pointers
     if (dryDelayL != nullptr)
@@ -47,6 +48,13 @@ void TapeProcessor::updateParams(const TapeParams& params)
                              params.thickness, 
                              params.gap);
 
+    // --- Degrade Processor --- <--- ADDED PARAMS UPDATE
+    degradeProcessor.setParameters(params.deg_depth,
+                                   params.deg_amount,
+                                   params.deg_variance,
+                                   params.deg_envelope,
+                                   params.deg_enabled);
+
     // --- Top-Level Parameters ---
     dryWet = params.dryWet;
 }
@@ -72,7 +80,11 @@ void TapeProcessor::processBlock(const float* inL,
     // A. Input Filters
     inputFilters.processBlock(bufferL, bufferR, blockSize);
 
-    // B. Loss Filter (Head simulation)
+    // B. Degrade Processor (Add Noise/Wow/Flutter before the tape head loss)
+    // <--- ADDED DEGRADE PROCESSING HERE
+    degradeProcessor.processBlock(bufferL, bufferR, blockSize);
+
+    // C. Loss Filter (Head simulation)
     // Note: In original structure, this was last, but without Hysteresis/Compression,
     // we place it here. It modifies bufferL/bufferR in place.
     lossFilter.processBlock(bufferL, bufferR, bufferL, bufferR, blockSize);
