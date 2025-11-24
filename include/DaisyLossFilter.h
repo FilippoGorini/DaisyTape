@@ -11,8 +11,10 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-// 64-tap FIR as per original
-#define LOSS_FIR_ORDER 64
+// Scaled Order: 64 * (48000/44100) ~= 70
+// This ensures the frequency resolution matches the original plugin.
+#define LOSS_FIR_ORDER 70
+
 // Crossfade length in samples
 #define LOSS_FADE_LEN 1024
 
@@ -33,13 +35,11 @@ public:
         head = 0;
     }
 
-    // --- FIX: Add ability to sync state from another filter ---
     void copyStateFrom(const StereoFIR& other) {
         head = other.head;
         for(int i=0; i<LOSS_FIR_ORDER; i++) {
             stateL[i] = other.stateL[i];
             stateR[i] = other.stateR[i];
-            // We do NOT copy coeffs, as we want the new coeffs!
         }
     }
 
@@ -96,7 +96,6 @@ struct StereoBiquad {
         b0=b1=b2=a1=a2=0.0f;
     }
 
-    // --- FIX: Add ability to sync state ---
     void copyStateFrom(const StereoBiquad& other) {
         xL[0] = other.xL[0]; xL[1] = other.xL[1];
         yL[0] = other.yL[0]; yL[1] = other.yL[1];

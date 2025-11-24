@@ -1,5 +1,8 @@
 #include "DaisyLossFilter.h"
 
+// Ensure the order is even, otherwise the symmetry logic breaks
+static_assert(LOSS_FIR_ORDER % 2 == 0, "LOSS_FIR_ORDER must be even!");
+
 LossFilter::LossFilter() : 
     fs(48000.0f), onOff(true), activeFilterIdx(0), 
     fadeCounter(0), triggerFade(false),
@@ -21,7 +24,7 @@ void LossFilter::prepare(float sampleRate)
     // Force active filter to have these coeffs immediately
     firFilters[activeFilterIdx].setCoefficients(computedFir);
     calcHeadBumpCoeffs(15.0f, 0.5f * 1.0e-6f, bumpFilters[activeFilterIdx]);
-    triggerFade = false; // No fade on startup
+    triggerFade = false; 
 }
 
 float LossFilter::getLatencySamples() const
@@ -33,6 +36,10 @@ float LossFilter::getLatencySamples() const
 // --- HEAVY MATH (Run in Main Thread) ---
 void LossFilter::setParameters(float speed, float spacing, float thickness, float gap)
 {
+    // Safety check
+    if (speed < 0.1f) speed = 0.1f;
+    if (gap < 0.1f) gap = 0.1f;
+
     // Check if anything changed significantly
     if (std::abs(speed - p_speed) < 0.01f && 
         std::abs(spacing - p_spacing) < 0.01f &&
@@ -42,60 +49,64 @@ void LossFilter::setParameters(float speed, float spacing, float thickness, floa
         return; // No change
     }
 
-    // Update stored params
     p_speed = speed;
     p_spacing = spacing;
     p_thickness = thickness;
     p_gap = gap;
 
-    // If we are already fading, we skip this update to prevent collision
-    // (Or we could force a hard update, but skipping is safer for now)
     if (fadeCounter > 0 || triggerFade) return;
 
-    // 1. Determine the "Back" filter (the one not currently playing)
     int backIdx = (activeFilterIdx == 0) ? 1 : 0;
 
-    // 2. Calculate FIR Coeffs into the Back Filter
     calcFirCoeffs(backIdx, speed, spacing, thickness, gap);
-
-    // 3. Calculate Head Bump Coeffs into the Back Filter
     calcHeadBumpCoeffs(speed, gap * 1.0e-6f, bumpFilters[backIdx]);
 
-    // 4. Signal Audio Thread to crossfade to this new filter
     triggerFade = true;
 }
 
 void LossFilter::calcHeadBumpCoeffs(float speedIps, float gapMeters, StereoBiquad& filter)
 {
-    // Constants matching JUCE code
+    // 1. Constants & Physics
     double speed = (double)speedIps;
     double gap = (double)gapMeters;
     double sampleRate = (double)fs;
 
     double bumpFreq = speed * 0.0254 / (gap * 500.0);
-    double gain = std::max(1.5 * (1000.0 - std::abs(bumpFreq - 100.0)) / 1000.0, 1.0);
+    double gainLinear = std::max(1.5 * (1000.0 - std::abs(bumpFreq - 100.0)) / 1000.0, 1.0);
     
-    double phi = 2.0 * M_PI * bumpFreq / sampleRate;
-    
-    // HACK: Using simple Biquad Peak formulas
-    // A = sqrt(gain)
-    double A_val = std::sqrt(gain);
-    double alpha_val = std::sin(phi) / (2.0 * 2.0); // Q=2.0
-    double cos_phi = std::cos(phi);
+    // 2. Convert to dB for RBJ formulas
+    double gainDB = 20.0 * std::log10(gainLinear);
+    double Q = 2.0;
 
-    double b0 = 1.0 + alpha_val * A_val;
-    double b1 = -2.0 * cos_phi;
-    double b2 = 1.0 - alpha_val * A_val;
-    double a0 = 1.0 + alpha_val / A_val;
-    double a1 = -2.0 * cos_phi;
-    double a2 = 1.0 - alpha_val / A_val;
+    // 3. Exact RBJ Peaking EQ Formulas
+    double w0 = 2.0 * M_PI * bumpFreq / sampleRate;
+    double cos_w0 = std::cos(w0);
+    double sin_w0 = std::sin(w0);
+    double alpha = sin_w0 / (2.0 * Q);
+    double A = std::pow(10.0, gainDB / 40.0);
 
-    // Normalize by a0
-    filter.setCoeffs((float)(b0/a0), (float)(b1/a0), (float)(b2/a0), (float)(a1/a0), (float)(a2/a0));
+    double b0r = 1.0 + alpha * A;
+    double b1r = -2.0 * cos_w0;
+    double b2r = 1.0 - alpha * A;
+    double a0r = 1.0 + alpha / A;
+    double a1r = -2.0 * cos_w0;
+    double a2r = 1.0 - alpha / A;
+
+    // 4. Normalize by a0
+    filter.setCoeffs((float)(b0r / a0r), 
+                     (float)(b1r / a0r), 
+                     (float)(b2r / a0r), 
+                     (float)(a1r / a0r), 
+                     (float)(a2r / a0r));
 }
 
 void LossFilter::calcFirCoeffs(int targetFilterIdx, float speed, float spacing, float thickness, float gap)
 {
+    // --- CRITICAL FIX: Zero-fill the array first ---
+    // The symmetric loop below misses index 0 (and overwrites center twice).
+    // Without this, computedFir[0] contains garbage memory.
+    std::fill(computedFir, computedFir + LOSS_FIR_ORDER, 0.0f);
+
     float binWidth = fs / (float)LOSS_FIR_ORDER;
     
     // 1. Frequency Domain Calculation
@@ -106,35 +117,33 @@ void LossFilter::calcFirCoeffs(int targetFilterIdx, float speed, float spacing, 
         float thickTimesK = waveNumber * (thickness * 1.0e-6f);
         float kGapOverTwo = waveNumber * (gap * 1.0e-6f) / 2.0f;
 
-        float val = std::exp(-waveNumber * (spacing * 1.0e-6f)); // Spacing
+        float val = std::exp(-waveNumber * (spacing * 1.0e-6f)); 
         
         if (std::abs(thickTimesK) > 1e-5f)
-            val *= (1.0f - std::exp(-thickTimesK)) / thickTimesK; // Thickness
+            val *= (1.0f - std::exp(-thickTimesK)) / thickTimesK; 
         
         if (std::abs(kGapOverTwo) > 1e-5f)
-            val *= std::sin(kGapOverTwo) / kGapOverTwo; // Gap
+            val *= std::sin(kGapOverTwo) / kGapOverTwo; 
 
         Hcoefs[k] = val;
-        Hcoefs[LOSS_FIR_ORDER - k - 1] = val; // Symmetric (Real FFT)
+        Hcoefs[LOSS_FIR_ORDER - k - 1] = val; 
     }
 
-    // 2. Inverse DFT (Naive implementation, slow but fine for Main Thread)
+    // 2. Inverse DFT
     for (int n = 0; n < LOSS_FIR_ORDER / 2; n++)
     {
         float sum = 0.0f;
         for (int k = 0; k < LOSS_FIR_ORDER; k++)
         {
-            // Real part only because H is symmetric
             float angle = 2.0f * M_PI * (float)k * (float)n / (float)LOSS_FIR_ORDER;
             sum += Hcoefs[k] * std::cos(angle);
         }
         float val = sum / (float)LOSS_FIR_ORDER;
         
         computedFir[LOSS_FIR_ORDER / 2 + n] = val;
-        computedFir[LOSS_FIR_ORDER / 2 - n] = val; // Symmetric Impulse Response (Linear Phase)
+        computedFir[LOSS_FIR_ORDER / 2 - n] = val; 
     }
 
-    // 3. Push to filter
     firFilters[targetFilterIdx].setCoefficients(computedFir);
 }
 
@@ -143,26 +152,16 @@ void LossFilter::processBlock(float* inL, float* inR, float* outL, float* outR, 
 {
     if (!onOff) return; 
     
-    // 1. Handle Trigger from Main Thread
     if (triggerFade && fadeCounter == 0) {
         triggerFade = false;
         fadeCounter = LOSS_FADE_LEN;
         
-        // --- CRITICAL FIX for CLICKS/POPS ---
-        // When starting to fade to the "Back" filter, it currently has stale history 
-        // (old audio data from seconds ago). We must synchronize its state with the 
-        // Active filter so the only difference is the coefficients.
-        
+        // Sync state to avoid clicks
         int backIdx = (activeFilterIdx == 0) ? 1 : 0;
-        
-        // 1. Copy FIR Delay Line history
         firFilters[backIdx].copyStateFrom(firFilters[activeFilterIdx]);
-        
-        // 2. Copy IIR (Biquad) Feedback history
         bumpFilters[backIdx].copyStateFrom(bumpFilters[activeFilterIdx]);
     }
 
-    // 2. Processing Loop
     for (int i = 0; i < blockSize; i++)
     {
         float l = inL[i];
@@ -185,7 +184,6 @@ void LossFilter::processBlock(float* inL, float* inR, float* outL, float* outR, 
             firFilters[backIdx].process(l, r, backL, backR);
             bumpFilters[backIdx].process(backL, backR, backFinalL, backFinalR);
 
-            // Mix
             float gOld = (float)fadeCounter / (float)LOSS_FADE_LEN;
             float gNew = 1.0f - gOld;
 
@@ -194,9 +192,8 @@ void LossFilter::processBlock(float* inL, float* inR, float* outL, float* outR, 
 
             fadeCounter--;
             
-            // End of fade? Swap!
             if (fadeCounter <= 0) {
-                activeFilterIdx = backIdx; // The "Back" (New) filter is now Active
+                activeFilterIdx = backIdx; 
             }
         }
 

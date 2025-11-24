@@ -3,3 +3,6 @@ build/
 
 # Exclude unnecessary vscode stuff
 .vscode/settings.json
+
+# Exclude VSCodeCounter extension files
+.VSCodeCounter/
