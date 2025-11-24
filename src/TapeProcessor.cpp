@@ -1,11 +1,10 @@
 #include "TapeProcessor.h"
 #include <cstring> 
 
-// Implementation for linking the SDRAM objects
 void TapeProcessor::setDelayLinePointers(MakeupDelayLine* makeL, MakeupDelayLine* makeR,
                                          DryDelayLine* dryL, DryDelayLine* dryR)
 {
-    // Pass Makeup Delay pointers to the InputFilters object
+    // Pass pointers to sub-modules
     inputFilters.setDelayLinePointers(makeL, makeR);
     
     // Store Dry Delay pointers internally
@@ -17,6 +16,7 @@ void TapeProcessor::Init(float sampleRate, const TapeParams& params)
 {
     const int numChannels = 2;
     inputFilters.prepare(sampleRate, numChannels);
+    lossFilter.prepare(sampleRate);
     
     // Init the Dry Delay objects via the pointers
     if (dryDelayL != nullptr)
@@ -30,7 +30,7 @@ void TapeProcessor::Init(float sampleRate, const TapeParams& params)
         dryDelayR->SetDelay(0.0f);
     }
 
-    updateParams(params);       // Initialize with default params
+    updateParams(params);
 }
 
 void TapeProcessor::updateParams(const TapeParams& params)
@@ -41,10 +41,14 @@ void TapeProcessor::updateParams(const TapeParams& params)
     inputFilters.setEnabled(params.filtersEnabled);
     inputFilters.setMakeupEnabled(params.makeupEnabled);
 
+    // --- Loss Filter ---
+    lossFilter.setParameters(params.speed, 
+                             params.spacing, 
+                             params.thickness, 
+                             params.gap);
+
     // --- Top-Level Parameters ---
     dryWet = params.dryWet;
-
-    // ... Other modules will be updated here (Tone, Hysteresis, etc.) ...
 }
 
 
@@ -64,19 +68,21 @@ void TapeProcessor::processBlock(const float* inL,
     }
 
     // --- 2. WET SIGNAL PATH ---
+    
+    // A. Input Filters
     inputFilters.processBlock(bufferL, bufferR, blockSize);
 
-    // ... Other modules will go here ...
+    // B. Loss Filter (Head simulation)
+    // Note: In original structure, this was last, but without Hysteresis/Compression,
+    // we place it here. It modifies bufferL/bufferR in place.
+    lossFilter.processBlock(bufferL, bufferR, bufferL, bufferR, blockSize);
 
     // --- 3. LATENCY COMPENSATION ---
     latencyCompensation(blockSize);
 
-
     // --- 4. MAKEUP GAIN PATH ---
+    // Must happen AFTER latency compensation to align with the delayed wet signal
     inputFilters.processBlockMakeup(bufferL, bufferR, blockSize);
-
-    // ... Other makeup modules will go here ...
-
 
     // --- 5. FINAL MIX ---
     dryWetMix(outL, outR, blockSize);
@@ -86,11 +92,12 @@ void TapeProcessor::latencyCompensation(int32_t blockSize)
 {
     // 1. Calculate total latency from all wet path modules
     float totalLatency = 0.0f;
-    // totalLatency += lossFilter.getLatencySamples();
+    
+    // The Loss Filter (FIR) introduces significant latency (Order/2)
+    totalLatency += lossFilter.getLatencySamples();
+    
+    // Future: Add latency from Oversampling/Compression here
     // totalLatency += compression.getLatencySamples();
-
-    // Placeholder: Use the fixed latency until we implement the other modules
-    totalLatency = 300.0f; 
 
     // 2. Set delay for InputFilters' makeup path
     inputFilters.setMakeupDelay(totalLatency);
@@ -122,7 +129,6 @@ void TapeProcessor::dryWetMix(float* outL, float* outR, int32_t blockSize)
         float dryL = dryBufferL[i];
         float dryR = dryBufferR[i];
 
-        // This is the classic linear crossfade mix
         outL[i] = (dryL * (1.0f - dryWet)) + (wetL * dryWet);
         outR[i] = (dryR * (1.0f - dryWet)) + (wetR * dryWet);
     }

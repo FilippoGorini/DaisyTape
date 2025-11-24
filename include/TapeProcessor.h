@@ -5,6 +5,7 @@
 #include <stdint.h> 
 #include "Config.h" 
 #include "DaisyInputFilters.h" 
+#include "DaisyLossFilter.h" // Added Loss Filter
 #include "daisysp.h" 
 
 // The Dry Delay uses the same massive size needed for latency compensation.
@@ -15,12 +16,25 @@ using DryDelayLine = daisysp::DelayLine<float, MAKEUP_DELAY_SIZE>;
  */
 struct TapeParams
 {
+    // Input Filters
     float lowCutFreq;
     float highCutFreq;
-    float dryWet;
     bool filtersEnabled;
     bool makeupEnabled;
-    // Add other parameters (drive, rate, depth, etc.) here as they are ported
+
+    // Tape Physics (Loss Filter)
+    float speed;     // Inches per second (e.g., 7.5, 15, 30)
+    float gap;       // Microns
+    float spacing;   // Microns
+    float thickness; // Microns
+    float loss;      // Not really needed, added just to ease serial logging
+
+    // Degradation (Placeholders for next step)
+    float variance;
+    float envelope;
+
+    // Global
+    float dryWet;
 };
 
 /**
@@ -36,6 +50,7 @@ public:
 
     /**
      * @brief CRITICAL: Sets the pointers to the globally allocated SDRAM delay lines.
+     * Includes new pointers for the Azimuth/Loss section.
      */
     void setDelayLinePointers(MakeupDelayLine* makeL, MakeupDelayLine* makeR,
                               DryDelayLine* dryL, DryDelayLine* dryR);
@@ -58,10 +73,11 @@ public:
 private:
     // --- Processing Modules ---
     InputFilters inputFilters;
+    LossFilter lossFilter;
     
-    // ... Other modules (Hysteresis, LossFilter, etc.) will go here ...
+    // ... Other modules (Hysteresis, etc.) will go here ...
 
-    // --- Internal Buffers (Can be up to SAFE_MAX_BLOCK_SIZE) ---
+    // --- Internal Buffers ---
     static constexpr int kMaxBlockSize = SAFE_MAX_BLOCK_SIZE;
 
     float bufferL[kMaxBlockSize];
@@ -73,7 +89,7 @@ private:
     DryDelayLine* dryDelayL = nullptr;
     DryDelayLine* dryDelayR = nullptr;
 
-    // --- Parameters (Internal state is kept in sub-processors) ---
+    // --- Parameters ---
     float dryWet;
 };
 

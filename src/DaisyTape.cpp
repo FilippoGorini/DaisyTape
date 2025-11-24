@@ -21,55 +21,60 @@ TapeProcessor tapeProcessor;
 TapeParams params;
 CpuLoadMeter cpuLoadMeter;
 
+// Potentiometer values
+float pot_lowcut  = 0.0f;
+float pot_highcut = 0.0f;
+float pot_loss    = 0.0f;
+float pot_speed   = 0.0f;
+
 
 // Audio callback function
-void AudioCallback(AudioHandle::InputBuffer in,
-                   AudioHandle::OutputBuffer out,
-                   size_t size)
+void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
     cpuLoadMeter.OnBlockStart();
 
-    // Process audio block
     tapeProcessor.processBlock(
-        in[0],
-        in[1],
-        out[0],
-        out[1],
-        size
+        in[0], in[1], out[0], out[1], size
     );
 
     cpuLoadMeter.OnBlockEnd();
 }
 
 
+// Function to read and map potentiometer values to parameters
 void read_map_params() 
 {   
     // Read ADCs 
     const float pot_lowcut = hw.adc.GetFloat(0);
     const float pot_highcut = hw.adc.GetFloat(1);
-    // const float pot_wetdry = hw.adc.GetFloat(2);     // To be added later
+    const float pot_loss    = hw.adc.GetFloat(2);
+    const float pot_speed = hw.adc.GetFloat(3);
 
-    // Map params if needed
+    // Input filters parameters mapping
     params.lowCutFreq = 20.0f * powf(2000.0f / 20.0f, pot_lowcut);          // Map Low Cut (20Hz to 2kHz, logarithmic scale)
     params.highCutFreq = 2000.0f * powf(22000.0f / 2000.0f, pot_highcut);   // Map High Cut (2kHz to 22kHz, logarithmic scale)
+    // Loss filter parameters mapping
+    params.gap = 1.0f + (pot_loss * 49.0f);                                 // Map Gap (1 to 50 microns)
+    params.spacing = 0.1f + (pot_loss * 19.9f);                             // Map Spacing (0.1 to 20 microns)
+    params.thickness = 0.1f + (pot_loss * 49.9f);                           // Map Thickness (0.1 to 50 microns)
+    params.speed = 1.0f + (pot_speed * 49.0f); 
+    params.loss = pot_loss;                                                 // Not needed, just for logging 
 }
 
 
+// Function to log current status
 void log_status()
 { 
-    hw.PrintLine("--- Status ---");
-    hw.PrintLine("Lowcut freq: " FLT_FMT3,
-                 FLT_VAR3(params.lowCutFreq));
-    hw.PrintLine("Highcut freq: " FLT_FMT3,
-                 FLT_VAR3(params.highCutFreq));
-    hw.PrintLine("Avg CPU Load: " FLT_FMT3,
-                 FLT_VAR3(cpuLoadMeter.GetAvgCpuLoad() * 100.0f));
-    hw.PrintLine("Max CPU Load: " FLT_FMT3,
-                 FLT_VAR3(cpuLoadMeter.GetMaxCpuLoad() * 100.0f));
-    hw.PrintLine("Min CPU Load: " FLT_FMT3,
-                 FLT_VAR3(cpuLoadMeter.GetMinCpuLoad() * 100.0f));
-    hw.PrintLine("--------------");
+    hw.PrintLine("Lowcut freq: " FLT_FMT3, FLT_VAR3(params.lowCutFreq));
+    hw.PrintLine("Highcut freq: " FLT_FMT3, FLT_VAR3(params.highCutFreq));
+    hw.PrintLine("Loss Knob: " FLT_FMT3, FLT_VAR3(params.loss));
+    hw.PrintLine("Speed (ips): " FLT_FMT3, FLT_VAR3(params.speed));
+    hw.PrintLine("Avg CPU Load: " FLT_FMT3, FLT_VAR3(cpuLoadMeter.GetAvgCpuLoad() * 100.0f));
+    hw.PrintLine("Max CPU Load: " FLT_FMT3, FLT_VAR3(cpuLoadMeter.GetMaxCpuLoad() * 100.0f));
+    hw.PrintLine("Min CPU Load: " FLT_FMT3, FLT_VAR3(cpuLoadMeter.GetMinCpuLoad() * 100.0f));
+    hw.PrintLine("------------");
 }
+
 
 int main(void)
 {
@@ -77,15 +82,17 @@ int main(void)
     hw.Init();
 
     // Setup audio configuration
-    hw.SetAudioBlockSize(48);
+    hw.SetAudioBlockSize(4);
     hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
     float sample_rate = hw.AudioSampleRate();
 
     // Setup ADCs for potentiometers
-    AdcChannelConfig adcConfig[2];
-    adcConfig[0].InitSingle(seed::A0);
-    adcConfig[1].InitSingle(seed::A1);
-    hw.adc.Init(adcConfig, 2);
+    AdcChannelConfig adcConfig[4];
+    adcConfig[0].InitSingle(seed::A0);      // Lowcut
+    adcConfig[1].InitSingle(seed::A1);      // Highcut
+    adcConfig[2].InitSingle(seed::A2);      // Loss
+    adcConfig[3].InitSingle(seed::A3);      // Tape speed
+    hw.adc.Init(adcConfig, 4);
 
     // Setup TapeProcessor
     tapeProcessor.setDelayLinePointers(&makeupDelayL, &makeupDelayR, &dryDelayL, &dryDelayR);
@@ -94,10 +101,15 @@ int main(void)
     params.dryWet        = 1.0f;
     params.lowCutFreq    = 20.0f;   
     params.highCutFreq   = 22000.0f;
+    params.gap          = 1.0f;
+    params.spacing      = 0.1f;
+    params.thickness    = 0.1f;
+    params.speed        = 15.0f;
     tapeProcessor.Init(sample_rate, params);
 
     // Setup CPU Load Meter
     cpuLoadMeter.Init(sample_rate, hw.AudioBlockSize());
+    int log_counter = 0;
 
     // Start adc, log and audio
     hw.adc.Start();
@@ -110,9 +122,12 @@ int main(void)
         read_map_params();
         // Update parameters
         tapeProcessor.updateParams(params);
-        // Optional log
-        log_status();
-        // Update at ~50Hz
-        System::Delay(20);      // Probably better to switch to a timer with a wait for next period for more regular execution of main?
+        // Optional log (50 times slower than the controls loop rate)
+        if (log_counter++ > 50) {
+            log_status();
+            log_counter = 0;
+        }
+        // Update at ~100Hz
+        System::Delay(10);      // Probably better to switch to a timer with a wait for next period for more regular execution of main?
     }
 }
