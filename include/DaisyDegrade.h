@@ -42,8 +42,8 @@ public:
 
     float nextFloat() noexcept
     {
-        uint32_t v = static_cast<uint32_t>(nextInt());
-        const float denom = static_cast<float>(std::numeric_limits<uint32_t>::max()) + 1.0f;
+        std::uint32_t v = static_cast<std::uint32_t>(nextInt());        // For some reason had to add std:: to avoid vscode warnings? It built succesfully even before nevertheless, so it's not really needed
+        const float denom = static_cast<float>(std::numeric_limits<std::uint32_t>::max()) + 1.0f;
         float res = static_cast<float>(v) / denom;
         if (res == 1.0f) res = 1.0f - std::numeric_limits<float>::epsilon();
         return res;
