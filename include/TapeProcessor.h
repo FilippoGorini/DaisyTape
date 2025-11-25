@@ -36,6 +36,7 @@ struct TapeParams
     float deg_variance;
     float deg_envelope;
     bool deg_enabled;
+    bool usePoint1x;
 
     // Global
     float dryWet;

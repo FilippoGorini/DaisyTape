@@ -53,7 +53,8 @@ void TapeProcessor::updateParams(const TapeParams& params)
                                    params.deg_amount,
                                    params.deg_variance,
                                    params.deg_envelope,
-                                   params.deg_enabled);
+                                   params.deg_enabled,
+                                   params.usePoint1x);
 
     // --- Top-Level Parameters ---
     dryWet = params.dryWet;

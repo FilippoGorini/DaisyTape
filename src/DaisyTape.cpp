@@ -110,6 +110,7 @@ int main(void)
     params.filtersEnabled = true;
     params.makeupEnabled  = false;
     params.deg_enabled  = true;
+    params.usePoint1x = true;
     params.dryWet        = 1.0f;
     params.lowCutFreq    = 20.0f;   
     params.highCutFreq   = 22000.0f;
