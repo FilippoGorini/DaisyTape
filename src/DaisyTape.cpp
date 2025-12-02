@@ -40,24 +40,24 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 void read_map_params() 
 {   
     // Read ADCs 
-    // const float pot_lowcut = hw.adc.GetFloat(0);
-    // const float pot_highcut = hw.adc.GetFloat(1);
-    // const float pot_tape_loss    = hw.adc.GetFloat(2);
-    // const float pot_tape_speed = hw.adc.GetFloat(3);
-    const float pot_deg_depth   = hw.adc.GetFloat(0); 
-    const float pot_deg_amount  = hw.adc.GetFloat(1); 
-    const float pot_deg_var     = hw.adc.GetFloat(2); 
-    const float pot_deg_env     = hw.adc.GetFloat(3); 
+    const float pot_lowcut = hw.adc.GetFloat(7);
+    const float pot_highcut = hw.adc.GetFloat(6);
+    const float pot_tape_loss    = hw.adc.GetFloat(5);
+    const float pot_tape_speed = hw.adc.GetFloat(4);
+    const float pot_deg_depth   = hw.adc.GetFloat(3); 
+    const float pot_deg_amount  = hw.adc.GetFloat(2); 
+    const float pot_deg_var     = hw.adc.GetFloat(1); 
+    const float pot_deg_env     = hw.adc.GetFloat(0); 
 
     // Input filters parameters mapping
-    // params.lowCutFreq = 20.0f * powf(2000.0f / 20.0f, pot_lowcut);          // Map Low Cut (20Hz to 2kHz, logarithmic scale)
-    // params.highCutFreq = 2000.0f * powf(22000.0f / 2000.0f, pot_highcut);   // Map High Cut (2kHz to 22kHz, logarithmic scale)
+    params.lowCutFreq = 20.0f * powf(2000.0f / 20.0f, pot_lowcut);          // Map Low Cut (20Hz to 2kHz, logarithmic scale)
+    params.highCutFreq = 2000.0f * powf(22000.0f / 2000.0f, pot_highcut);   // Map High Cut (2kHz to 22kHz, logarithmic scale)
     // Loss filter parameters mapping
-    // params.gap = 1.0f + (pot_tape_loss * 49.0f);                                 // Map Gap (1 to 50 microns)
-    // params.spacing = 0.1f + (pot_tape_loss * 19.9f);                             // Map Spacing (0.1 to 20 microns)
-    // params.thickness = 0.1f + (pot_tape_loss * 49.9f);                           // Map Thickness (0.1 to 50 microns)
-    // params.speed = 1.0f + (pot_tape_speed * 49.0f); 
-    // params.loss = pot_tape_loss;                                                 // Not needed, just for logging 
+    params.gap = 1.0f + (pot_tape_loss * 49.0f);                                 // Map Gap (1 to 50 microns)
+    params.spacing = 0.1f + (pot_tape_loss * 19.9f);                             // Map Spacing (0.1 to 20 microns)
+    params.thickness = 0.1f + (pot_tape_loss * 49.9f);                           // Map Thickness (0.1 to 50 microns)
+    params.speed = 1.0f + (pot_tape_speed * 49.0f); 
+    params.loss = pot_tape_loss;                                                 // Not needed, just for logging 
     // Degrade processor parameters mapping
     params.deg_depth    = pot_deg_depth;
     params.deg_amount   = pot_deg_amount;
@@ -73,16 +73,16 @@ void log_status()
     hw.PrintLine("Deg amount: " FLT_FMT3, FLT_VAR3(params.deg_amount));
     hw.PrintLine("Deg variance: " FLT_FMT3, FLT_VAR3(params.deg_variance));
     hw.PrintLine("Deg envelope: " FLT_FMT3, FLT_VAR3(params.deg_envelope));
-    // hw.PrintLine("Lowcut freq: " FLT_FMT3, FLT_VAR3(params.lowCutFreq));
-    // hw.PrintLine("Highcut freq: " FLT_FMT3, FLT_VAR3(params.highCutFreq));
-    // hw.PrintLine("Loss Knob: " FLT_FMT3, FLT_VAR3(params.loss));
-    // hw.PrintLine("Speed (ips): " FLT_FMT3, FLT_VAR3(params.speed));
+    hw.PrintLine("Lowcut freq: " FLT_FMT3, FLT_VAR3(params.lowCutFreq));
+    hw.PrintLine("Highcut freq: " FLT_FMT3, FLT_VAR3(params.highCutFreq));
+    hw.PrintLine("Loss Knob: " FLT_FMT3, FLT_VAR3(params.loss));
+    hw.PrintLine("Speed (ips): " FLT_FMT3, FLT_VAR3(params.speed));
     hw.PrintLine("Avg CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetAvgCpuLoad() * 100.0f));
     hw.PrintLine("Max CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMaxCpuLoad() * 100.0f));
     hw.PrintLine("Min CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMinCpuLoad() * 100.0f));
-    // hw.PrintLine("Avg Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetAvgCpuLoad() * 100.0f));
-    // hw.PrintLine("Max Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMaxCpuLoad() * 100.0f));
-    // hw.PrintLine("Min Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMinCpuLoad() * 100.0f));
+    hw.PrintLine("Avg Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetAvgCpuLoad() * 100.0f));
+    hw.PrintLine("Max Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMaxCpuLoad() * 100.0f));
+    hw.PrintLine("Min Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMinCpuLoad() * 100.0f));
     hw.PrintLine("------------");
 }
 
@@ -98,12 +98,16 @@ int main(void)
     float sample_rate = hw.AudioSampleRate();
 
     // Setup ADCs for potentiometers
-    AdcChannelConfig adcConfig[4];
+    AdcChannelConfig adcConfig[8];
     adcConfig[0].InitSingle(seed::A0);      // Lowcut
     adcConfig[1].InitSingle(seed::A1);      // Highcut
     adcConfig[2].InitSingle(seed::A2);      // Loss
     adcConfig[3].InitSingle(seed::A3);      // Tape speed
-    hw.adc.Init(adcConfig, 4);
+    adcConfig[4].InitSingle(seed::A4);      // Deg. depth
+    adcConfig[5].InitSingle(seed::A5);      // Deg. amount
+    adcConfig[6].InitSingle(seed::A6);      // Deg. variance
+    adcConfig[7].InitSingle(seed::A7);      // Deg. envelope
+    hw.adc.Init(adcConfig, 8);
 
     // Setup TapeProcessor
     tapeProcessor.setDelayLinePointers(&makeupDelayL, &makeupDelayR, &dryDelayL, &dryDelayR);
