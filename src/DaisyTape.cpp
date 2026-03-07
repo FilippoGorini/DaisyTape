@@ -32,6 +32,13 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         in[0], in[1], out[0], out[1], size
     );
 
+    // // Copy input directly to output (bypass)
+    // for(size_t i = 0; i < size; i++)
+    // {
+    //     out[0][i] = in[0][i];
+    //     out[1][i] = in[1][i];
+    // }
+
     audioLoadMeter.OnBlockEnd();
 }
 
@@ -77,13 +84,14 @@ void log_status()
     hw.PrintLine("Highcut freq: " FLT_FMT3, FLT_VAR3(params.highCutFreq));
     hw.PrintLine("Loss Knob: " FLT_FMT3, FLT_VAR3(params.loss));
     hw.PrintLine("Speed (ips): " FLT_FMT3, FLT_VAR3(params.speed));
-    hw.PrintLine("Avg CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetAvgCpuLoad() * 100.0f));
-    hw.PrintLine("Max CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMaxCpuLoad() * 100.0f));
-    hw.PrintLine("Min CPU Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMinCpuLoad() * 100.0f));
-    hw.PrintLine("Avg Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetAvgCpuLoad() * 100.0f));
+    hw.PrintLine("Avg Audio Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetAvgCpuLoad() * 100.0f));
+    hw.PrintLine("Max Audio Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMaxCpuLoad() * 100.0f));
+    hw.PrintLine("Min Audio Load: " FLT_FMT3, FLT_VAR3(audioLoadMeter.GetMinCpuLoad() * 100.0f));
+    // hw.PrintLine("Avg Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetAvgCpuLoad() * 100.0f));
     hw.PrintLine("Max Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMaxCpuLoad() * 100.0f));
-    hw.PrintLine("Min Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMinCpuLoad() * 100.0f));
+    // hw.PrintLine("Min Main Load: " FLT_FMT3, FLT_VAR3(mainLoadMeter.GetMinCpuLoad() * 100.0f));
     hw.PrintLine("------------");
+    // hw.PrintLine("this should come every 0.5 seconds...");
 }
 
 

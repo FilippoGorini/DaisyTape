@@ -6,3 +6,6 @@ build/
 
 # Exclude VSCodeCounter extension files
 .VSCodeCounter/
+
+# Exclude CREO cad directory for now
+cad/

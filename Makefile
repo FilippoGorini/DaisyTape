@@ -10,6 +10,9 @@ C_INCLUDES += -Iinclude
 # Use C++17 (not needed for now)
 # CPP_STANDARD = -std=c++17
 
+# # Added this to load the program into SRAM instead of FLASH (speed slightly lower than internal flash but we have more space)
+APP_TYPE = BOOT_SRAM
+
 # Library Locations
 LIBDAISY_DIR = ../libDaisy/
 DAISYSP_DIR = ../DaisySP/
