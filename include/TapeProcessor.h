@@ -96,7 +96,7 @@ private:
     DryDelayLine* dryDelayR = nullptr;
 
     // --- Parameters ---
-    float dryWet;
+    volatile float dryWet; // written from main, read from interrupt — volatile prevents register caching
 };
 
 #endif // TAPEPROCESSOR_H

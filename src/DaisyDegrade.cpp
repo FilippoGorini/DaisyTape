@@ -3,8 +3,11 @@
 #include <cassert>
 
 DegradeProcessor::DegradeProcessor()
-    : fs(48000.0f), onOff(true), usePoint1xFlag(false),
+    : fs(48000.0f),
+      onOff(true), usePoint1xFlag(false),
       p_depth(0.0f), p_amount(0.0f), p_variance(0.0f), p_envelope(0.0f),
+      pending_depth(0.0f), pending_amount(0.0f), pending_variance(0.0f), pending_envelope(0.0f),
+      pending_onOff(true), pending_usePoint1x(false), paramsDirty(false),
       sampleCounter(0)
 {
     paramRng.setSeed(0x12345678abcdefULL);
@@ -29,14 +32,29 @@ void DegradeProcessor::prepare(float sampleRate)
     cookParams();
 }
 
-void DegradeProcessor::setParameters(float depth, float amount, float variance, float envelope, bool enabled, bool usePoint1x)
+void DegradeProcessor::prepareParams(float depth, float amount, float variance, float envelope,
+                                     bool enabled, bool usePoint1x)
 {
-    p_depth = depth;
-    p_amount = amount;
-    p_variance = variance;
-    p_envelope = envelope;
-    onOff = enabled;
-    usePoint1xFlag = usePoint1x;
+    pending_depth    = depth;
+    pending_amount   = amount;
+    pending_variance = variance;
+    pending_envelope = envelope;
+    pending_onOff    = enabled;
+    pending_usePoint1x = usePoint1x;
+    __DMB();
+    paramsDirty = true;
+}
+
+void DegradeProcessor::applyParams()
+{
+    if (!paramsDirty) return;
+    paramsDirty = false;
+    p_depth        = pending_depth;
+    p_amount       = pending_amount;
+    p_variance     = pending_variance;
+    p_envelope     = pending_envelope;
+    onOff          = pending_onOff;
+    usePoint1xFlag = pending_usePoint1x;
 }
 
 void DegradeProcessor::cookParams()

@@ -128,11 +128,13 @@ public:
     ~LossFilter() {}
 
     void prepare(float sampleRate);
-    
-    // Called from Main Thread (calculates coefficients)
-    void setParameters(float speed, float spacing, float thickness, float gap);
 
-    // Called from Audio Thread (applies filter & crossfade)
+    // Called from main thread: compute coefficients into staging buffers
+    void prepareParams(float speed, float spacing, float thickness, float gap);
+    // Called from interrupt: atomically swap staged coefficients into back buffer and arm fade
+    void applyParams();
+
+    // Called from interrupt: apply filter and handle crossfade
     void processBlock(float* inL, float* inR, float* outL, float* outR, int32_t blockSize);
 
     float getLatencySamples() const;
@@ -140,28 +142,29 @@ public:
 private:
     // Math helpers
     void calcHeadBumpCoeffs(float speedIps, float gapMeters, StereoBiquad& filter);
-    void calcFirCoeffs(int targetFilterIdx, float speed, float spacing, float thickness, float gap);
+    void calcFirCoeffs(float speed, float spacing, float thickness, float gap);
 
-    // State
     float fs;
     bool onOff;
-    
-    // Double-buffered Filters (Active and Inactive/Fading)
+
+    // Double-buffered filters (active and inactive/fading)
     StereoFIR firFilters[2];
     StereoBiquad bumpFilters[2];
-    
-    int activeFilterIdx;
-    
-    // Crossfading
-    int fadeCounter;
-    bool triggerFade; // Flag from main thread to audio thread
-    
-    // Parameters (stored to detect changes)
+
+    volatile int activeFilterIdx;
+    volatile int fadeCounter;
+    volatile bool triggerFade;
+
+    // Staging — written from main (prepareParams), read from interrupt (applyParams)
+    volatile bool stageReady;
+    float computedFir[LOSS_FIR_ORDER]; // staged FIR coefficients
+    StereoBiquad stagedBump;           // staged bump filter coefficients
+
+    // Parameters — stored to suppress redundant recomputes
     float p_speed, p_spacing, p_thickness, p_gap;
 
-    // Temp arrays for coefficient calc
+    // Temporary frequency-domain buffer used during FIR calculation
     float Hcoefs[LOSS_FIR_ORDER];
-    float computedFir[LOSS_FIR_ORDER];
 };
 
 #endif // DAISY_LOSSFILTER_H

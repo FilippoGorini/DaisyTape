@@ -36,27 +36,19 @@ void TapeProcessor::Init(float sampleRate, const TapeParams& params)
 
 void TapeProcessor::updateParams(const TapeParams& params)
 {
-    // --- Input Filters ---
-    inputFilters.setLowCut(params.lowCutFreq);
-    inputFilters.setHighCut(params.highCutFreq);
-    inputFilters.setEnabled(params.filtersEnabled);
-    inputFilters.setMakeupEnabled(params.makeupEnabled);
+    // Stage new parameters for each module.
+    // Actual application happens at the top of processBlock() in interrupt context.
+    // This avoids inconsistent parameters due to interruptions by the audio callback.
+    inputFilters.prepareParams(params.lowCutFreq, params.highCutFreq,
+                               params.filtersEnabled, params.makeupEnabled);
 
-    // --- Loss Filter ---
-    lossFilter.setParameters(params.speed, 
-                             params.spacing, 
-                             params.thickness, 
-                             params.gap);
+    lossFilter.prepareParams(params.speed, params.spacing,
+                             params.thickness, params.gap);
 
-    // --- Degrade Processor --- <--- ADDED PARAMS UPDATE
-    degradeProcessor.setParameters(params.deg_depth,
-                                   params.deg_amount,
-                                   params.deg_variance,
-                                   params.deg_envelope,
-                                   params.deg_enabled,
-                                   params.usePoint1x);
+    degradeProcessor.prepareParams(params.deg_depth, params.deg_amount,
+                                   params.deg_variance, params.deg_envelope,
+                                   params.deg_enabled, params.usePoint1x);
 
-    // --- Top-Level Parameters ---
     dryWet = params.dryWet;
 }
 
@@ -67,7 +59,12 @@ void TapeProcessor::processBlock(const float* inL,
                                  float* outR,
                                  int32_t blockSize)
 {
-    // 1. Store dry signal and copy input to our internal wet buffer
+    // 1. Apply any staged parameter updates — safe here since we're in interrupt context
+    inputFilters.applyParams();
+    lossFilter.applyParams();
+    degradeProcessor.applyParams();
+
+    // 2. Store dry signal and copy input to our internal wet buffer
     for (int32_t i = 0; i < blockSize; i++)
     {
         dryBufferL[i] = inL[i];
@@ -76,13 +73,12 @@ void TapeProcessor::processBlock(const float* inL,
         bufferR[i]    = inR[i];
     }
 
-    // --- 2. WET SIGNAL PATH ---
-    
+    // --- 3. WET SIGNAL PATH ---
+
     // A. Input Filters
     inputFilters.processBlock(bufferL, bufferR, blockSize);
 
-    // B. Degrade Processor (Add Noise/Wow/Flutter before the tape head loss)
-    // <--- ADDED DEGRADE PROCESSING HERE
+    // B. Degrade Processor
     degradeProcessor.processBlock(bufferL, bufferR, blockSize);
 
     // C. Loss Filter (Head simulation)
@@ -90,14 +86,14 @@ void TapeProcessor::processBlock(const float* inL,
     // we place it here. It modifies bufferL/bufferR in place.
     lossFilter.processBlock(bufferL, bufferR, bufferL, bufferR, blockSize);
 
-    // --- 3. LATENCY COMPENSATION ---
+    // --- 4. LATENCY COMPENSATION ---
     latencyCompensation(blockSize);
 
-    // --- 4. MAKEUP GAIN PATH ---
+    // --- 5. MAKEUP GAIN PATH ---
     // Must happen AFTER latency compensation to align with the delayed wet signal
     inputFilters.processBlockMakeup(bufferL, bufferR, blockSize);
 
-    // --- 5. FINAL MIX ---
+    // --- 6. FINAL MIX ---
     dryWetMix(outL, outR, blockSize);
 }
 

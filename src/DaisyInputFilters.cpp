@@ -1,8 +1,12 @@
 #include "DaisyInputFilters.h"
 
-InputFilters::InputFilters() : onOff(false), makeup(false), fs(48000.0f), numChannels(0),
-                               lowCutFreq(20.0f), highCutFreq(22000.0f),
-                               makeupDelay { nullptr, nullptr } // Initialize pointers
+InputFilters::InputFilters()
+    : pendingLowCut(20.0f), pendingHighCut(22000.0f),
+      pendingOnOff(false), pendingMakeup(false), paramsDirty(false),
+      onOff(false), makeup(false),
+      fs(48000.0f), numChannels(0),
+      lowCutFreq(20.0f), highCutFreq(22000.0f),
+      makeupDelay{ nullptr, nullptr }
 {
 }
 
@@ -110,17 +114,30 @@ void InputFilters::setMakeupDelay(float delaySamples)
     }
 }
 
-void InputFilters::setLowCut(float freqHz)
+void InputFilters::prepareParams(float lowCut, float highCut, bool enabled, bool makeupEnabled)
 {
-    lowCutFreq = freqHz;
-    for(int i = 0; i < numChannels; ++i)
-        lowCutFilter[i].setCutoff(lowCutFreq);
+    pendingLowCut  = lowCut;
+    pendingHighCut = highCut;
+    pendingOnOff   = enabled;
+    pendingMakeup  = makeupEnabled;
+    __DMB();    // Data Memory Barrier: ARM Cortex CPU instruction that forces all pending memory write operations to complete before execution continues
+    paramsDirty = true;
 }
 
-void InputFilters::setHighCut(float freqHz)
+void InputFilters::applyParams()
 {
-    // Clamp high cut to just below Nyquist
-    highCutFreq = std::fmin(freqHz, fs * 0.48f);
-    for(int i = 0; i < numChannels; ++i)
+    // Don't apply params unless they all have been prepared (paramsDirty flag is set to true)
+    if (!paramsDirty) return;
+    paramsDirty = false;
+
+    onOff  = pendingOnOff;
+    makeup = pendingMakeup;
+
+    lowCutFreq = pendingLowCut;
+    for (int i = 0; i < numChannels; ++i)
+        lowCutFilter[i].setCutoff(lowCutFreq);
+
+    highCutFreq = std::fmin(pendingHighCut, fs * 0.48f);
+    for (int i = 0; i < numChannels; ++i)
         highCutFilter[i].setCutoff(highCutFreq);
 }

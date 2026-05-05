@@ -3,28 +3,32 @@
 // Ensure the order is even, otherwise the symmetry logic breaks
 static_assert(LOSS_FIR_ORDER % 2 == 0, "LOSS_FIR_ORDER must be even!");
 
-LossFilter::LossFilter() : 
-    fs(48000.0f), onOff(true), activeFilterIdx(0), 
-    fadeCounter(0), triggerFade(false),
-    p_speed(0), p_spacing(0), p_thickness(0), p_gap(0)
+LossFilter::LossFilter()
+    : fs(48000.0f), onOff(true),
+      activeFilterIdx(0), fadeCounter(0), triggerFade(false),
+      stageReady(false),
+      p_speed(-1.0f), p_spacing(-1.0f), p_thickness(-1.0f), p_gap(-1.0f)
 {
 }
 
 void LossFilter::prepare(float sampleRate)
 {
     fs = sampleRate;
-    
-    for(int i=0; i<2; i++) {
+    activeFilterIdx = 0;
+    fadeCounter     = 0;
+    triggerFade     = false;
+    stageReady      = false;
+
+    for (int i = 0; i < 2; i++) {
         firFilters[i].reset();
         bumpFilters[i].reset();
     }
-    
-    setParameters(15.0f, 0.5f, 0.5f, 0.5f);
-    
-    // Force active filter to have these coeffs immediately
+
+    // Initialize active filter directly — no staging needed during prepare
+    p_speed = 15.0f; p_spacing = 0.5f; p_thickness = 0.5f; p_gap = 0.5f;
+    calcFirCoeffs(p_speed, p_spacing, p_thickness, p_gap);
     firFilters[activeFilterIdx].setCoefficients(computedFir);
-    calcHeadBumpCoeffs(15.0f, 0.5f * 1.0e-6f, bumpFilters[activeFilterIdx]);
-    triggerFade = false; 
+    calcHeadBumpCoeffs(p_speed, p_gap * 1.0e-6f, bumpFilters[activeFilterIdx]);
 }
 
 float LossFilter::getLatencySamples() const
@@ -33,34 +37,50 @@ float LossFilter::getLatencySamples() const
     return onOff ? (float)LOSS_FIR_ORDER / 2.0f : 0.0f;
 }
 
-// --- HEAVY MATH (Run in Main Thread) ---
-void LossFilter::setParameters(float speed, float spacing, float thickness, float gap)
+// --- HEAVY MATH (Main thread) ---
+void LossFilter::prepareParams(float speed, float spacing, float thickness, float gap)
 {
-    // Safety check
     if (speed < 0.1f) speed = 0.1f;
     if (gap < 0.1f) gap = 0.1f;
 
     // Check if anything changed significantly
-    if (std::abs(speed - p_speed) < 0.01f && 
+    if (std::abs(speed - p_speed) < 0.01f &&
         std::abs(spacing - p_spacing) < 0.01f &&
         std::abs(thickness - p_thickness) < 0.01f &&
-        std::abs(gap - p_gap) < 0.01f) 
+        std::abs(gap - p_gap) < 0.01f)
     {
-        return; // No change
+        return;     // If not, return
     }
 
-    p_speed = speed;
-    p_spacing = spacing;
-    p_thickness = thickness;
+    p_speed = speed; 
+    p_spacing = spacing; 
+    p_thickness = thickness; 
     p_gap = gap;
 
-    if (fadeCounter > 0 || triggerFade) return;
+    // Don't overwrite staging if a previous stage hasn't been consumed yet,
+    // or if a crossfade is already running.
+    if (stageReady || fadeCounter > 0 || triggerFade) return;
 
-    int backIdx = (activeFilterIdx == 0) ? 1 : 0;
+    // Compute into staging buffers — safe, interrupt never reads these until stageReady is set
+    calcFirCoeffs(speed, spacing, thickness, gap);
+    calcHeadBumpCoeffs(speed, gap * 1.0e-6f, stagedBump);
 
-    calcFirCoeffs(backIdx, speed, spacing, thickness, gap);
-    calcHeadBumpCoeffs(speed, gap * 1.0e-6f, bumpFilters[backIdx]);
+    __DMB(); // ensure all stores are visible before the flag
+    stageReady = true;
+}
 
+// --- INTERRUPT THREAD ---
+void LossFilter::applyParams()
+{
+    if (!stageReady) return;
+    stageReady = false;
+
+    // Determine back buffer index here — safe since we're in interrupt and activeFilterIdx is stable
+    int backIdx = 1 - activeFilterIdx;
+
+    firFilters[backIdx].setCoefficients(computedFir);
+    bumpFilters[backIdx].setCoeffs(stagedBump.b0, stagedBump.b1, stagedBump.b2,
+                                   stagedBump.a1, stagedBump.a2);
     triggerFade = true;
 }
 
@@ -100,7 +120,7 @@ void LossFilter::calcHeadBumpCoeffs(float speedIps, float gapMeters, StereoBiqua
                      (float)(a2r / a0r));
 }
 
-void LossFilter::calcFirCoeffs(int targetFilterIdx, float speed, float spacing, float thickness, float gap)
+void LossFilter::calcFirCoeffs(float speed, float spacing, float thickness, float gap)
 {
     // --- CRITICAL FIX: Zero-fill the array first ---
     // The symmetric loop below misses index 0 (and overwrites center twice).
@@ -108,8 +128,8 @@ void LossFilter::calcFirCoeffs(int targetFilterIdx, float speed, float spacing, 
     std::fill(computedFir, computedFir + LOSS_FIR_ORDER, 0.0f);
 
     float binWidth = fs / (float)LOSS_FIR_ORDER;
-    
-    // 1. Frequency Domain Calculation
+
+    // Frequency domain calculation
     for (int k = 0; k < LOSS_FIR_ORDER / 2; k++)
     {
         float freq = (float)k * binWidth;
@@ -117,19 +137,19 @@ void LossFilter::calcFirCoeffs(int targetFilterIdx, float speed, float spacing, 
         float thickTimesK = waveNumber * (thickness * 1.0e-6f);
         float kGapOverTwo = waveNumber * (gap * 1.0e-6f) / 2.0f;
 
-        float val = std::exp(-waveNumber * (spacing * 1.0e-6f)); 
-        
+        float val = std::exp(-waveNumber * (spacing * 1.0e-6f));
+
         if (std::abs(thickTimesK) > 1e-5f)
-            val *= (1.0f - std::exp(-thickTimesK)) / thickTimesK; 
-        
+            val *= (1.0f - std::exp(-thickTimesK)) / thickTimesK;
+
         if (std::abs(kGapOverTwo) > 1e-5f)
-            val *= std::sin(kGapOverTwo) / kGapOverTwo; 
+            val *= std::sin(kGapOverTwo) / kGapOverTwo;
 
         Hcoefs[k] = val;
-        Hcoefs[LOSS_FIR_ORDER - k - 1] = val; 
+        Hcoefs[LOSS_FIR_ORDER - k - 1] = val;
     }
 
-    // 2. Inverse DFT
+    // Inverse DFT
     for (int n = 0; n < LOSS_FIR_ORDER / 2; n++)
     {
         float sum = 0.0f;
@@ -139,12 +159,11 @@ void LossFilter::calcFirCoeffs(int targetFilterIdx, float speed, float spacing, 
             sum += Hcoefs[k] * std::cos(angle);
         }
         float val = sum / (float)LOSS_FIR_ORDER;
-        
-        computedFir[LOSS_FIR_ORDER / 2 + n] = val;
-        computedFir[LOSS_FIR_ORDER / 2 - n] = val; 
-    }
 
-    firFilters[targetFilterIdx].setCoefficients(computedFir);
+        computedFir[LOSS_FIR_ORDER / 2 + n] = val;
+        computedFir[LOSS_FIR_ORDER / 2 - n] = val;
+    }
+    // Result sits in computedFir[] — caller (prepareParams or prepare) decides what to do with it
 }
 
 // --- AUDIO THREAD ---

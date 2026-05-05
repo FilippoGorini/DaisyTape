@@ -2,6 +2,7 @@
 #ifndef DAISY_DEGRADE_H
 #define DAISY_DEGRADE_H
 
+#include "Config.h"
 #include "daisy_seed.h"
 #include <cmath>
 #include <vector>
@@ -239,7 +240,7 @@ private:
     float tauAtt = 1.0f, tauRel = 1.0f;
     float yOld = 0.0f;
     bool increasing = true;
-    float absBuf[DEG_BLOCK_SIZE];
+    float absBuf[SAFE_MAX_BLOCK_SIZE];      // Changed from DRG_BLOCK_SIZE to SAFE_MAX_BLOCK_SIZE
 };
 
 // -------------------------------
@@ -354,7 +355,11 @@ public:
 
     void prepare(float sampleRate);
 
-    void setParameters(float depth, float amount, float variance, float envelope, bool enabled, bool usePoint1x = false);
+    // Called from main thread: stage new parameters
+    void prepareParams(float depth, float amount, float variance, float envelope,
+                       bool enabled, bool usePoint1x = false);
+    // Called from interrupt: apply staged parameters
+    void applyParams();
 
     void processBlock(float* inL, float* inR, int blockSize);
 
@@ -363,25 +368,28 @@ private:
     void processShortBlock(float* chunkL, float* chunkR, int numSamples);
 
     float fs;
-    bool onOff;
-    bool usePoint1xFlag;
 
-    // Parameters
+    // Live values — written only from interrupt (via applyParams)
+    volatile bool onOff;
+    volatile bool usePoint1xFlag;
     float p_depth, p_amount, p_variance, p_envelope;
 
-    // Sub-Processors
+    // Staged values — written from main, consumed by applyParams()
+    float pending_depth, pending_amount, pending_variance, pending_envelope;
+    bool pending_onOff, pending_usePoint1x;
+    volatile bool paramsDirty;
+
     DegradeFilter filters[2];
     DegradeNoise noises[2];
     ChowLevelDetector levelDetector;
 
-    // Internal Scratch Buffers
-    float noiseBufL[DEG_BLOCK_SIZE];
-    float noiseBufR[DEG_BLOCK_SIZE];
-    float levelBuf[DEG_BLOCK_SIZE];
+    // Scratch buffers — sized to actual max block, not the modulation block size
+    float noiseBufL[SAFE_MAX_BLOCK_SIZE];       // These were also changed from DEG_BLOCK_SIZE to SAFE_MAX_BLOCK_SIZE
+    float noiseBufR[SAFE_MAX_BLOCK_SIZE];
+    float levelBuf[SAFE_MAX_BLOCK_SIZE];
 
     JuceRandom paramRng;
     int sampleCounter;
-
     // --- CRITICAL FIX: Use Linear Smoother for Gain ---
     // This ensures gain changes ramp over a fixed duration (2048 samples)
     // regardless of the audio block size.
